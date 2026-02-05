@@ -11,9 +11,9 @@ export const connectDB = async () => {
       bufferCommands: false,
     });
 
-    console.log("✅ MongoDB Connected");
+    console.log("MongoDB Connected");
   } catch (err) {
-    console.error("❌ MongoDB Error:", err.message);
-    throw err;   // ❗ DO NOT use process.exit in Vercel
+    console.error(" MongoDB Error:", err.message);
+    throw err;   // DO NOT use process.exit in Vercel
   }
 };

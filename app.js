@@ -10,7 +10,7 @@ app.use(express.json());
 app.use("/api/github", githubRoutes);
 
 app.get("/", (req, res) => {
-  res.send("🚀 GitHub Analytics Backend is Running");
+  res.send("GitHub Analytics Backend is Running");
 });
 
 export default app;
