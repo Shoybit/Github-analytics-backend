@@ -1,9 +1,10 @@
+import { connectDB } from "../config/db.js";
 import express from "express";
 import GithubAnalytics from "../models/GithubAnalytics.js";
 import {
   fetchAndSaveGithubData,
   getGithubAnalytics,
-} from "../config/controllers/github.controller.js";
+} from "../controllers/github.controller.js";
 
 
 const router = express.Router();
@@ -13,6 +14,7 @@ const router = express.Router();
 ========================= */
 router.get("/stats.svg", async (req, res) => {
   try {
+    await connectDB(); 
     const username = req.query.user;
     if (!username) {
       return res.status(400).type("text/plain").send("Username required");
