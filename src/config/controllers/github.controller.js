@@ -1,5 +1,5 @@
 import axios from "axios";
-import GithubAnalytics from "../models/GithubAnalytics.js";
+import GithubAnalytics from "../../models/GithubAnalytics.js";
 
 /* =========================
    GraphQL: Contribution Calendar

@@ -3,7 +3,8 @@ import GithubAnalytics from "../models/GithubAnalytics.js";
 import {
   fetchAndSaveGithubData,
   getGithubAnalytics,
-} from "../controllers/github.controller.js";
+} from "../config/controllers/github.controller.js";
+
 
 const router = express.Router();
 
