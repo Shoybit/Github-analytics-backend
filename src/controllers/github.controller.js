@@ -1,5 +1,6 @@
 import axios from "axios";
 import GithubAnalytics from "../models/GithubAnalytics.js";
+import * as cheerio from "cheerio";
 
 /* =========================
    GraphQL: Contribution Calendar
@@ -25,10 +26,7 @@ const fetchContributionCalendar = async (username) => {
 
   const res = await axios.post(
     "https://api.github.com/graphql",
-    {
-      query,
-      variables: { username },
-    },
+    { query, variables: { username } },
     {
       headers: {
         Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
@@ -39,78 +37,100 @@ const fetchContributionCalendar = async (username) => {
   return res.data.data.user.contributionsCollection.contributionCalendar;
 };
 
-/* =========================
-   Calendar → Streak Logic
-========================= */
+/* 
+   SCRAPE (TRY) — fallback GraphQL if blocked
+*/
+const scrapeExactGitHubStats = async (username) => {
+  try {
+    const url = `https://github.com/users/${username}/contributions`;
+
+    const { data } = await axios.get(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+      },
+    });
+
+    const $ = cheerio.load(data);
+
+    const text = $("h2").first().text().trim();
+    const match = text.match(/(\d+)/);
+    const totalContributions = match ? parseInt(match[1]) : 0;
+
+    const days = [];
+
+    $("rect[data-date]").each((i, el) => {
+      days.push({
+        date: $(el).attr("data-date"),
+        count: parseInt($(el).attr("data-count") || "0"),
+      });
+    });
+
+    if (days.length === 0) throw new Error("Blocked");
+
+    let longestStreak = 0;
+    let temp = 0;
+
+    for (const d of days) {
+      if (d.count > 0) {
+        temp++;
+        longestStreak = Math.max(longestStreak, temp);
+      } else temp = 0;
+    }
+
+    let currentStreak = 0;
+    const today = new Date().toISOString().slice(0, 10);
+
+    for (let i = days.length - 1; i >= 0; i--) {
+      if (days[i].count > 0) currentStreak++;
+      else if (days[i].date === today) continue;
+      else break;
+    }
+
+    return { totalContributions, longestStreak, currentStreak };
+  } catch {
+    console.log("⚠️ Scrape blocked → using GraphQL fallback");
+    return null;
+  }
+};
+
+/* 
+   GraphQL Streak Logic
+ */
 const calculateStreaks = (weeks) => {
   const days = weeks
-    .flatMap(w => w.contributionDays)
+    .flatMap((w) => w.contributionDays)
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 
-  let currentStreak = 0;
   let longestStreak = 0;
-  let tempStreak = 0;
-  const activeWeeksSet = new Set();
+  let currentStreak = 0;
+  let temp = 0;
 
   const today = new Date().toISOString().slice(0, 10);
 
-  // Helper: get ISO week key
-  const getWeekKey = (dateStr) => {
-    const d = new Date(dateStr);
-    const year = d.getUTCFullYear();
-    const week = Math.ceil(
-      ((d - new Date(Date.UTC(year, 0, 1))) / 86400000 + 1) / 7
-    );
-    return `${year}-W${week}`;
-  };
-
-  for (const day of days) {
-    if (day.contributionCount > 0) {
-      tempStreak++;
-      longestStreak = Math.max(longestStreak, tempStreak);
-      activeWeeksSet.add(getWeekKey(day.date));
-    } else {
-      tempStreak = 0;
-    }
+  for (const d of days) {
+    if (d.contributionCount > 0) {
+      temp++;
+      longestStreak = Math.max(longestStreak, temp);
+    } else temp = 0;
   }
 
-let startIndex = days.length - 1;
-
-while (startIndex >= 0 && days[startIndex].date > today) {
-  startIndex--;
-}
-
-if (
-  startIndex >= 0 &&
-  days[startIndex].date === today &&
-  days[startIndex].contributionCount === 0
-) {
-  startIndex--;
-}
-
-// 3️⃣ last active day থেকে streak count
-for (let i = startIndex; i >= 0; i--) {
-  if (days[i].contributionCount > 0) {
-    currentStreak++;
-  } else {
-    break;
+  for (let i = days.length - 1; i >= 0; i--) {
+    if (days[i].contributionCount > 0) currentStreak++;
+    else if (days[i].date === today) continue;
+    else break;
   }
-}
 
+  const activeWeeks = new Set(
+    days.filter((d) => d.contributionCount > 0).map((d) => d.date.slice(0, 7))
+  ).size;
 
-  return {
-    currentStreak,
-    longestStreak,
-    activeWeeks: activeWeeksSet.size,
-  };
+  return { longestStreak, currentStreak, activeWeeks };
 };
 
-
-/* =========================
-   MAIN ANALYTICS FUNCTION
-========================= */
+/* 
+   MAIN FUNCTION
+*/
 export const fetchAndSaveGithubData = async (username) => {
-  // Fetch repos (public + private + forked)
   const repoRes = await axios.get(
     "https://api.github.com/user/repos?per_page=100&type=all",
     {
@@ -125,34 +145,15 @@ export const fetchAndSaveGithubData = async (username) => {
   let forkedRepos = 0;
   let totalStars = 0;
   let totalForks = 0;
-  let totalCommitActivity = 0;
 
-  // Repo + commit activity
-  for (const repo of repoRes.data) {
+  repoRes.data.forEach((repo) => {
     totalStars += repo.stargazers_count;
     totalForks += repo.forks_count;
-
     if (repo.private) privateRepos++;
     if (repo.fork) forkedRepos++;
+  });
 
-    try {
-      const commitRes = await axios.get(
-        `https://api.github.com/repos/${repo.owner.login}/${repo.name}/commits`,
-        {
-          headers: {
-            Authorization: `token ${process.env.GITHUB_TOKEN}`,
-          },
-          params: {
-            author: repo.owner.login,
-            per_page: 100,
-          },
-        }
-      );
-      totalCommitActivity += commitRes.data.length;
-    } catch {}
-  }
-
-  // REST: PRs / Issues / Reviews
+  // PR / Issue / Review
   const since = new Date(
     new Date().setFullYear(new Date().getFullYear() - 1)
   )
@@ -175,36 +176,34 @@ export const fetchAndSaveGithubData = async (username) => {
     `reviewed-by:${username} created:>=${since}`
   );
 
-  // GraphQL: contribution calendar
+  // GraphQL calendar
   const calendar = await fetchContributionCalendar(username);
-  const { currentStreak, longestStreak, activeWeeks } =
-    calculateStreaks(calendar.weeks);
+  const gqlStats = calculateStreaks(calendar.weeks);
 
-  const totalContributions = calendar.totalContributions;
+  // Try scrape
+  const scraped = await scrapeExactGitHubStats(username);
 
-  // Save to DB (remove old field if exists)
+  const totalContributions = scraped?.totalContributions ?? calendar.totalContributions;
+  const longestStreak = scraped?.longestStreak ?? gqlStats.longestStreak;
+  const currentStreak = scraped?.currentStreak ?? gqlStats.currentStreak;
+  const activeWeeks = gqlStats.activeWeeks;
+
   const analytics = await GithubAnalytics.findOneAndUpdate(
     { username },
     {
-      $set: {
-        totalRepos,
-        privateRepos,
-        forkedRepos,
-        totalStars,
-        totalForks,
-        totalCommitActivity,
-        totalPRs,
-        totalIssues,
-        totalReviews,
-        totalContributions,
-        currentStreak,
-        longestStreak,
-        activeWeeks,
-        lastUpdated: new Date(),
-      },
-      $unset: {
-        totalCommits: "",
-      },
+      totalRepos,
+      privateRepos,
+      forkedRepos,
+      totalStars,
+      totalForks,
+      totalPRs,
+      totalIssues,
+      totalReviews,
+      totalContributions,
+      currentStreak,
+      longestStreak,
+      activeWeeks,
+      lastUpdated: new Date(),
     },
     { upsert: true, new: true }
   );
