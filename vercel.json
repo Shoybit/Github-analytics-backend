@@ -8,6 +8,13 @@
   ],
   "routes": [
     {
+      "src": "/api/github/stats.svg",
+      "headers": {
+        "Cache-Control": "no-store"
+      },
+      "dest": "index.js"
+    },
+    {
       "src": "/(.*)",
       "dest": "index.js"
     }

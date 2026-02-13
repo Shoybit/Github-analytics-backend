@@ -14,29 +14,34 @@ const router = express.Router();
 ========================= */
 router.get("/stats.svg", async (req, res) => {
   try {
-    await connectDB(); 
+    await connectDB();
+
     const username = req.query.user;
     if (!username) {
       return res.status(400).type("text/plain").send("Username required");
     }
 
-    const data = await GithubAnalytics.findOne({ username });
+    const data = await GithubAnalytics.findOne({ username }).lean();
+
     if (!data) {
-      const errorSvg = `
-<svg width="720" height="200" viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg">
-  <rect width="720" height="200" rx="15" fill="#0d1117"/>
-  <text x="360" y="100" text-anchor="middle" fill="#8b949e" font-size="20" font-family="Arial, sans-serif">
-    No GitHub data found for "${username}"
+      return res.status(404).setHeader("Content-Type", "image/svg+xml").send(`
+<svg width="720" height="200" xmlns="http://www.w3.org/2000/svg">
+  <rect width="720" height="200" fill="#0d1117"/>
+  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle"
+        fill="#f85149" font-size="18">
+    No analytics data
   </text>
-  <text x="360" y="130" text-anchor="middle" fill="#484f58" font-size="14" font-family="Arial, sans-serif">
-    Try updating first at /github/update/${username}
-  </text>
-</svg>`;
-      return res.status(404).setHeader("Content-Type", "image/svg+xml").send(errorSvg);
+</svg>`);
     }
 
     res.setHeader("Content-Type", "image/svg+xml");
-    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.setHeader(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
+    );
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+
 
     // Calculate values for visualizations
     const maxTotal = Math.max(data.totalContributions, 1000);
@@ -81,7 +86,7 @@ router.get("/stats.svg", async (req, res) => {
     };
     
     const activityLevel = getActivityLevel();
-    const lastUpdated = new Date(data.updatedAt || Date.now()).toLocaleDateString('en-US', {
+    const lastUpdated = new Date(data.lastUpdated || Date.now()).toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
       year: 'numeric'
